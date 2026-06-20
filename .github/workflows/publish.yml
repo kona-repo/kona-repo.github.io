@@ -1,0 +1,44 @@
+name: Publish issue as post
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  publish:
+    if: github.event.label.name == 'publish'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create post from issue
+        env:
+          TITLE: ${{ github.event.issue.title }}
+          BODY: ${{ github.event.issue.body }}
+          NUMBER: ${{ github.event.issue.number }}
+        run: |
+          DATE_FILE=$(date -u '+%Y-%m-%d')
+          DATE_FM=$(date -u '+%Y-%m-%d %H:%M:%S %z')
+          SLUG=$(printf '%s' "$TITLE" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')
+          [ -z "$SLUG" ] && SLUG="issue-$NUMBER"
+          ESC_TITLE=$(printf '%s' "$TITLE" | sed 's/\\/\\\\/g; s/"/\\"/g')
+          FILE="_posts/${DATE_FILE}-${SLUG}.md"
+          mkdir -p _posts
+          {
+            echo "---"
+            echo "layout: post"
+            echo "title: \"${ESC_TITLE}\""
+            echo "date: ${DATE_FM}"
+            echo "---"
+            echo ""
+            printf '%s\n' "$BODY"
+          } > "$FILE"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$FILE"
+          git diff --cached --quiet || git commit -m "Publish: ${TITLE}"
+          git push
