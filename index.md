@@ -1,4 +1,5 @@
 ---
 layout: home
-title: Home
 ---
+
+Studying the security canon from scratch — CISSP first — and what each principle really means inside a vehicle.
