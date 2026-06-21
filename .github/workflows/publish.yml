@@ -2,43 +2,65 @@ name: Publish issue as post
 
 on:
   issues:
-    types: [labeled]
+    types: [labeled, edited]
 
 permissions:
   contents: write
   issues: write
 
+concurrency:
+  group: publish-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
 jobs:
   publish:
-    if: github.event.label.name == 'publish'
+    if: contains(github.event.issue.labels.*.name, 'publish')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create post from issue
+      - name: Create or update post from issue
         env:
           TITLE: ${{ github.event.issue.title }}
           BODY: ${{ github.event.issue.body }}
           NUMBER: ${{ github.event.issue.number }}
+          CREATED: ${{ github.event.issue.created_at }}
         run: |
-          DATE_FILE=$(date -u '+%Y-%m-%d')
-          DATE_FM=$(date -u '+%Y-%m-%d %H:%M:%S %z')
-          SLUG=$(printf '%s' "$TITLE" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')
-          [ -z "$SLUG" ] && SLUG="issue-$NUMBER"
-          ESC_TITLE=$(printf '%s' "$TITLE" | sed 's/\\/\\\\/g; s/"/\\"/g')
-          FILE="_posts/${DATE_FILE}-${SLUG}.md"
+          set -e
           mkdir -p _posts
+          CREATED_DATE=${CREATED%%T*}
+          UPDATED_DATE=$(date -u '+%Y-%m-%d')
+
+          # 同じ issue の既存記事を探す → あればURL(ファイル名)を固定して上書き
+          EXISTING=$(grep -rl "^issue: ${NUMBER}\$" _posts 2>/dev/null | head -n1 || true)
+          if [ -n "$EXISTING" ]; then
+            FILE="$EXISTING"
+          else
+            SLUG=$(printf '%s' "$TITLE" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')
+            [ -z "$SLUG" ] && SLUG="issue-$NUMBER"
+            FILE="_posts/${CREATED_DATE}-${SLUG}.md"
+          fi
+
+          ESC_TITLE=$(printf '%s' "$TITLE" | sed 's/\\/\\\\/g; s/"/\\"/g')
           {
             echo "---"
             echo "layout: post"
             echo "title: \"${ESC_TITLE}\""
-            echo "date: ${DATE_FM}"
+            echo "date: ${CREATED_DATE}"
+            echo "issue: ${NUMBER}"
             echo "---"
             echo ""
             printf '%s\n' "$BODY"
+            if [ "$UPDATED_DATE" != "$CREATED_DATE" ]; then
+              echo ""
+              echo "---"
+              echo ""
+              echo "*Last updated: ${UPDATED_DATE}*"
+            fi
           } > "$FILE"
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add "$FILE"
-          git diff --cached --quiet || git commit -m "Publish: ${TITLE}"
+          git diff --cached --quiet || git commit -m "Publish/update: ${TITLE} (#${NUMBER})"
           git push
